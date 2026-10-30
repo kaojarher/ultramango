@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>超人力霸王：裝備大搜索 (進階桌遊版)</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
+    
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      touch-action: manipulation;
+    }
+
+    /* 3D 翻牌效果 */
+    .card-container {
+      perspective: 1000px;
+    }
+
+    .card-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      transform-style: preserve-3d;
+    }
+
+    .card-container.flipped .card-inner {
+      transform: rotateY(180deg);
+    }
+
+    .card-container.matched .card-inner {
+      transform: rotateY(180deg) scale(0.92);
+    }
+    /* 透明度設在牌面，避免 3D 翻轉被壓平而露出鏡像牌背 */
+    .card-container.matched .card-face { opacity: 0.6; filter: saturate(.7); }
+    .card-container.matched { cursor: default; pointer-events: none; }
+
+    .card-face {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      backface-visibility: hidden;
+      border-radius: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-back {
+      background: linear-gradient(135deg, #991b1b 0%, #450a0a 100%);
+      border: 2px solid #f59e0b;
+    }
+
+    .card-front {
+      transform: rotateY(180deg);
+      border: 2px solid #334155;
+    }
+
+    /* 特殊卡牌震動抖動動畫 */
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-8px); }
+      40%, 80% { transform: translateX(8px); }
+    }
+
+    .shake-anim {
+      animation: shake 0.5s ease-in-out;
+    }
+
+    /* 脈衝螢光效果 */
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 15px rgba(245, 158, 11, 0.6); }
+      50% { box-shadow: 0 0 25px rgba(245, 158, 11, 0.9); }
+    }
+
+    .hint-glow {
+      animation: pulse-glow 1s infinite;
+    }
+
+    /* 配對成功：合體演出 */
+    #fusionOverlay { position:fixed; inset:0; z-index:90; display:none; align-items:center; justify-content:center; flex-direction:column; background:rgba(2,6,23,.82); backdrop-filter:blur(3px); cursor:pointer; }
+    #fusionOverlay.show { display:flex; }
+    #fusionStage { position:relative; width:min(78vw,340px); height:min(78vw,340px); display:flex; align-items:center; justify-content:center; }
+    #fusionStage img { image-rendering:pixelated; position:absolute; max-width:none; }
+    .fz-hero  { width:42%; animation:fzL .7s cubic-bezier(.5,0,.3,1) forwards; }
+    .fz-equip { width:42%; animation:fzR .7s cubic-bezier(.5,0,.3,1) forwards; }
+    @keyframes fzL { 0%{transform:translateX(-170%) scale(1);opacity:1} 80%{transform:translateX(0) scale(1.1);opacity:1} 100%{transform:translateX(0) scale(.2);opacity:0} }
+    @keyframes fzR { 0%{transform:translateX(170%) scale(1);opacity:1} 80%{transform:translateX(0) scale(1.1);opacity:1} 100%{transform:translateX(0) scale(.2);opacity:0} }
+    .fz-flash { width:20%; height:20%; border-radius:9999px; background:radial-gradient(circle,#fff 0%,var(--fz,#fbbf24) 45%,transparent 70%); opacity:0; position:absolute; animation:fzFlash .6s .55s ease-out forwards; }
+    @keyframes fzFlash { 0%{opacity:1;transform:scale(.3)} 100%{opacity:0;transform:scale(9)} }
+    .fz-fused { width:100%; opacity:0; filter:drop-shadow(0 0 18px var(--fz,#fbbf24)); animation:fzPop .6s 1s cubic-bezier(.2,1.6,.4,1) forwards, fzGlow 1s 1.6s ease-in-out infinite alternate; }
+    @keyframes fzPop { 0%{opacity:0;transform:scale(.3)} 100%{opacity:1;transform:scale(1)} }
+    @keyframes fzGlow { 0%{filter:drop-shadow(0 0 8px var(--fz,#fbbf24))} 100%{filter:drop-shadow(0 0 28px var(--fz,#fbbf24))} }
+    #fusionText { margin-top:14px; font-weight:900; font-size:1.15rem; color:#fde68a; text-align:center; opacity:0; animation:fzText .4s 1.2s forwards; }
+    @keyframes fzText { to{opacity:1} }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-2 md:p-6 select-none">
+
+  <!-- 頂部標題列 -->
+  <header class="text-center my-2">
+    <div class="inline-flex items-center gap-2 bg-red-900/40 px-4 py-1.5 rounded-full border border-red-500/30 mb-1">
+      <i data-lucide="shield-alert" class="w-5 h-5 text-amber-400"></i>
+      <span class="text-xs md:text-sm font-bold tracking-wider text-amber-300">ULTRAMAN 桌遊系列</span>
+    </div>
+    <h1 class="text-2xl md:text-4xl font-black tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-amber-300 to-yellow-500 drop-shadow-md">
+      超人力霸王：裝備大搜索
+    </h1>
+  </header>
+
+  <!-- 遊戲儀表板與狀態 -->
+  <main class="max-w-4xl mx-auto w-full flex-grow flex flex-col justify-center">
+    
+    <!-- 設定面板 (遊戲開始前或選單) -->
+    <div id="setupPanel" class="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 md:p-8 backdrop-blur-md shadow-2xl max-w-xl mx-auto w-full my-auto">
+      <h2 class="text-xl font-bold text-center text-amber-400 mb-6 flex items-center justify-center gap-2">
+        <i data-lucide="sliders"></i> 選擇遊戲模式與難度
+      </h2>
+
+      <!-- 1. 遊戲內容模式 -->
+      <div class="mb-6">
+        <label class="block text-sm font-bold text-slate-300 mb-2">1. 牌組內容與規則</label>
+        <div class="grid grid-cols-2 gap-3">
+          <button type="button" onclick="selectContentMode('basic')" id="btnContentBasic" 
+            class="p-3 rounded-xl border-2 text-left transition-all flex flex-col gap-1 border-amber-500 bg-amber-500/10 text-amber-300">
+            <span class="font-bold flex items-center gap-1.5"><i data-lucide="smile" class="w-4 h-4"></i> 基礎配對</span>
+            <span class="text-xs text-slate-400">超人 + 對應裝備配對（適合幼童）</span>
+          </button>
+
+          <button type="button" onclick="selectContentMode('advanced')" id="btnContentAdv" 
+            class="p-3 rounded-xl border-2 border-slate-700 bg-slate-900/50 text-slate-400 text-left transition-all flex flex-col gap-1 hover:border-slate-500">
+            <span class="font-bold flex items-center gap-1.5"><i data-lucide="skull" class="w-4 h-4 text-red-400"></i> 進階挑戰</span>
+            <span class="text-xs text-slate-400">新增「巴爾坦星人怪獸卡」與「萬能光線卡」</span>
+          </button>
+        </div>
+
+        <!-- Canva 自訂圖片與顏色對應按鈕 -->
+        <button type="button" onclick="toggleCustomImageModal()" class="w-full mt-3 p-2.5 rounded-xl border border-dashed border-amber-400/60 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold flex items-center justify-center gap-2 transition-all">
+          <i data-lucide="image-plus" class="w-4 h-4"></i> 🎨 上傳 Canva 繪製的原創超人與武器圖片
+        </button>
+      </div>
+
+
+      <!-- 2. 遊玩模式 -->
+      <div class="mb-6">
+        <label class="block text-sm font-bold text-slate-300 mb-2">2. 遊玩模式</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button type="button" onclick="selectPlayMode('single')" id="btnPlaySingle" class="p-3 rounded-xl border-2 border-amber-500 bg-amber-500/10 text-amber-300 text-center font-bold text-sm transition-all">單人練習</button>
+          <button type="button" onclick="selectPlayMode('timer')" id="btnPlayTimer" class="p-3 rounded-xl border-2 border-slate-700 bg-slate-900/50 text-slate-400 text-center font-bold text-sm transition-all hover:border-slate-500">限時 60 秒</button>
+          <button type="button" onclick="selectPlayMode('versus')" id="btnPlayVersus" class="p-3 rounded-xl border-2 border-slate-700 bg-slate-900/50 text-slate-400 text-center font-bold text-sm transition-all hover:border-slate-500">雙人對戰</button>
+        </div>
+      </div>
+
+      <button type="button" onclick="startGame()" class="w-full py-3.5 bg-gradient-to-r from-red-600 to-amber-600 text-white font-black text-lg rounded-xl shadow-lg hover:brightness-110 active:scale-95 transition-all">
+        開始遊戲
+      </button>
+    </div>
+
+    <!-- 遊戲面板 -->
+    <div id="gamePanel" class="hidden flex-col gap-2 w-full">
+      <div class="flex items-center justify-between gap-2">
+        <button type="button" onclick="backToMenu()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-lg">← 主選單</button>
+
+        <div id="statusSingle" class="flex items-center gap-3 text-xs md:text-sm font-bold">
+          <span class="text-slate-300">步數 <span id="moveCount" class="text-amber-300">0</span></span>
+          <span class="text-slate-300">配對 <span id="matchCount" class="text-amber-300">0</span>/<span id="totalPairs">6</span></span>
+          <span id="timerDisplay" class="hidden text-red-300">⏱️ <span id="timeRemaining">60</span> 秒</span>
+        </div>
+
+        <div id="statusVersus" class="hidden items-center gap-2 text-xs md:text-sm">
+          <div id="p1Box" class="px-3 py-1.5 rounded-lg border-2 border-blue-500 bg-blue-500/20 text-blue-300 font-bold flex items-center gap-2">玩家1 <span id="p1Score">0</span></div>
+          <div id="p2Box" class="px-3 py-1.5 rounded-lg border-2 border-transparent bg-slate-700/50 text-slate-400 font-bold flex items-center gap-2">玩家2 <span id="p2Score">0</span></div>
+          <span id="turnIndicator" class="text-amber-300 font-bold">玩家 1 回合</span>
+        </div>
+
+        <div id="skillArea" class="hidden">
+          <button type="button" onclick="useSkillHint()" class="px-3 py-1.5 bg-amber-500/20 border border-amber-400/60 text-amber-300 text-xs font-bold rounded-lg hover:bg-amber-500/30">💡 奧特意念</button>
+        </div>
+      </div>
+
+      <div id="toastMessage" class="hidden text-center py-1.5 px-4 bg-red-600/90 text-white font-bold text-xs md:text-sm rounded-lg shadow-md animate-bounce"></div>
+
+      <div id="cardGrid" class="grid grid-cols-4 gap-2 md:gap-4 my-2"></div>
+    </div>
+
+  </main>
+
+  <!-- 尾部腳本與版權 -->
+  <footer class="text-center text-xs text-slate-500 my-2">
+    © ULTRAMAN Fan Made Tabletop Web App - 適合親子同樂<br>角色圖：Liberated Pixel Cup (LPC) Universal Spritesheet 素材，授權 CC-BY-SA 3.0 / GPL 3.0，作者名單見 github.com/LiberatedPixelCup/Universal-LPC-Spritesheet-Character-Generator 的 CREDITS.csv
+  </footer>
+
+  <!-- 獲勝 / 結算彈窗 Modal -->
+  <div id="winModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-slate-800 border-2 border-amber-500/80 rounded-2xl p-6 max-w-sm w-full text-center shadow-2xl relative">
+      <div class="w-16 h-16 bg-amber-500/20 text-amber-400 rounded-full flex items-center justify-center mx-auto mb-3 border border-amber-400/40">
+        <i data-lucide="trophy" class="w-8 h-8"></i>
+      </div>
+      <h3 id="winTitle" class="text-2xl font-black text-amber-400 mb-2">🎉 任務成功！</h3>
+      <p id="winDesc" class="text-sm text-slate-300 mb-6">你成功找到了所有英雄對應的裝備！</p>
+
+      <div class="space-y-3">
+        <button onclick="closeModal(); startGame();" class="w-full py-3 bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold rounded-xl shadow-md hover:brightness-110 active:scale-95 transition-all">
+          再玩一次
+        </button>
+        <button onclick="closeModal(); backToMenu();" class="w-full py-2.5 bg-slate-700 text-slate-300 font-bold rounded-xl hover:bg-slate-600 transition-all text-sm">
+          返回主選單
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Canva 自訂圖片與顏色設定 Modal -->
+  <div id="customImgModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div class="bg-slate-800 border-2 border-amber-500 rounded-2xl p-5 max-w-md w-full shadow-2xl my-auto text-slate-200">
+      <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
+        <h3 class="text-lg font-bold text-amber-400 flex items-center gap-2">
+          <i data-lucide="palette"></i> Canva 原創卡牌編輯器
+        </h3>
+        <button onclick="toggleCustomImageModal()" class="text-slate-400 hover:text-white"><i data-lucide="x"></i></button>
+      </div>
+
+      <p class="text-xs text-slate-300 mb-4 bg-slate-900/60 p-3 rounded-lg border border-slate-700">
+        💡 <b>Canva 繪製建議</b>：建立 <span class="text-amber-300">400x600 px</span> 正方形或長方形畫布，繪製後匯出為 PNG。同一組合（超人與武器）可設定<b>相同顏色標籤</b>進行視覺輔助！
+      </p>
+
+      <div id="customPairsContainer" class="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+        <!-- 動態產生圖片上傳與顏色選擇欄位 -->
+      </div>
+
+      <div class="flex gap-2 mt-5">
+        <button onclick="saveCustomPairs()" class="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-sm transition-all">
+          儲存並使用自訂圖組
+        </button>
+        <button onclick="resetCustomPairs()" class="py-2.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold rounded-xl transition-all">
+          重置預設
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // LPC 像素角色圖庫（由 Liberated Pixel Cup 圖層合成）
+    const LPC = {"p1_hero": "data:image/png;base64,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", "p1_equip": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAADbklEQVR4nO3dv2vVYBTG8aOIuCg4iaCri1DQQbEdOlUKVVChiyBO9ccoLV1sFawOin+ApZMIji46iA7SoVUcLAgFtwqKWjuILnbTxZsmMedtcm+Sm9vn+5libm6McDhP3jfvjWYAAAAAAAAAAAAAAAAAAAAAgB62LfRh/5H+P0VPuLi0GDwnmmV7ty8A3UUBiNuR98DpGxPR9vCZs+5xA0cHMmODaGgmOoA4CkAcBSAu9z3At9W1aPvmtavR9onBk4njFt4tRNtfvr6JtkdHxt0hJfcH3UMHEEcBiMvdeuOzgmOXL0b7Vz4sJY5LR0JL3/H97rlHR8Yz9xMN1aMDiKMAxLXVYr04MPs/Elq8aDDz48GLBjPioSx0AHEUgLiO22h6zUA6Elq8aDArd+RgRjwUQQcQRwGIowDElZ6V3jpC797ArNyho9nWnlk8fOBgrnWay58/5fq30gHEUQDiamuJoSXmZQ4dzbbezGK87T+ZG0x8tvzqR+Z3ph+/3zgmEAd0AHEUgLjcS8I6FWyxs1Z45PB6/kXgb8uOh3u3x9xvTE5lX0PTouHQ8KPUngvR1vePvwufjw4gjgIQRwGIa1S+pbUzdDRrb2Zx986fmfsnp+bc79R1fxAfBj64fizx2ZU7bzO/w0wgcqEAxDU6AkLqmln0osHMj4cyosGb/Ts3Np84Lm+r99ABxFEA4no2AkLqWpMQ/8Fs3NzsQ/c7Xjykn/N7bb/Tlp9GBxBHAYjbkhHgCY0cTp0eyty//mvVPZ8XD140mPnxcPdScg1DfIKn7LYfRwcQRwGIowDE1bYgpAk2maHLvD/w7g3M/EUpoaFj/H2LM7fuBy6nHnQAcRSAOKkICAnEQ+GhY2i94q49+wpdV9XoAOIoAHFEwCbKHjk8e/oy2p4Y2httr62sF7+4EtABxFEA4qQeBtUl9NAp/dCnJb26t8oHQHF0AHEUgDgKQBz3ACVp59c7cXVlfhodQBwFII4I6EBdv96pEh1AHAUgrrGtqYm69eudKtEBxFEA4igAcSwIyeC9kXvmfF/iz72a+3F0AHEUgDgi4B9vVi/++tVurdurEh1AHAUgjgjIkHgj9/ONt3Hnea7fa+gA4igAcT05eVG1sv9rtiajA4ijAMRRAAAAAAAAAAAAAAAAAAAAAAAAAADQc/4CMYcAZpakLWgAAAAASUVORK5CYII=", "p2_hero": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAINklEQVR4nO2dX2wUVRTGP4x/CKU1RVraWJGAsSpWREV4MEpSMURiiFE0JjwgMWiMPIhREzGamOgDaHnAB2KM+GCiiRrTGAzBrUFfFJVSaEhTAwRhTUuLVAoloA/1oT0zZ2fOzs5ud3fu9JzfSyf33rlzd3PPd885d3oXMAzDMAzDMNQxI+kBVIs5s68ZD5bNnX1tqN3Zi/8CAM5d/E/Fd3NV0gMwkmVazfIoK2+unwkAGBi5HNlHsB0pAmc6qYMpgHJsAijn6qQHUCpx5B4AGuuuy9sHybzUnv4OjV4JtQfgPTvty4EpgHJSNXu51UdZewOz+oWNs3L6OHBsxLsm6+Yq0RChGMNMDYiuo8MA0qsEpgDKScWsJcvniZslN18PQLb2b7sHvbKgD8DX9CjFODF0CUCu1S+/pT6nDgCOZkcBAL2nR72yNKmBKYBybAIoJ1VhIMk+4Ms2l2iS48UtdV4Z1UsOX7ANJ+g8Ar4DSUtBPnpPj44D6VgKTAGU47QCBJ0/yVnL9A55ZVwhCLJW7hgSkooE1SBKCXj/koqkAVMA5dgEUI7TSwBB2T4usyT90nZtFDwPQNeS0xi3D8oJcMfw8J/n6dJ5Z9AUQDnOKYCU75d25sjy227yrZecOu64kfO376vPAQCPPPmMVye9HEJqEBUaFlIJUqxi1SkJTAGUYxNAOc4sAdKGT5AoyQZ8af7i56x/z4E9Oe35pg09i5dJ/QaRtox5biBNmAIoxxkFYKFSyAmMgjtk9HJG0Oo5vK55+ZrQc8jhpDBzU/sCr46snIV5Xj3tQwCF3zx2CVMA5TijAJIPQGEUhX9SWEVWD0RbvgS1b2t/PFRHz+IvfwwJ4R+pArd6upd9FmdfIjUFUI5NAOU4swQQksyTvEoOXLGyL8G3kYMyPyz8XwAfY9TylIaMoCmAcpxRAHKOWpsXeA7T8IW/ctoMH/rJuy6H5UsEQzge8kn7D2kK+SRMAZRjE0A5ziwBEiTz5PBxaDloWPqgVzZjXluo3fiZ3oLPkbaZB0+eAgA0LZjv1UWdKLLvjQ1eWdvadRN/hfyCa5gCKMdpBSC4dQXp7fzSuz6YeSdUv2bjSgC5ShGEO3JHdr0OANj91LpQu6hTRprmzwuVpeG8IVMA5TinAMHQD/DXVG7tZHHbV7/tlfXsfCB07w93vAAA+ODQLgCyEvBEzSuT7Xv6Pss7Rt6e1In3K/ksrmIKoBybAMpx1jkBwucAcWeQloC6J970ypYtvA0AsGRzh1f28cuPAgCuO+FnEaO4snBCyp/b8R0AIPPe014dhYFSbj+th06aAijH2ZnJISVoqL3RK+vavh5ArvO19PkdoXt/+f4bAMUrwIpV4STOYE8GgB8qAkD7qxPOouS8umz5hCmAcmwCKMc5iappXhI6AFLix833A/BzBNWA4nvujD6089eC940NHHbueyZMAZTjTCaQLH9Oq59FW7T23Zw2v22727s+mOkDADTN9527qHx/OSDnb88n+0N1y17rCZUd79xKl56quaYGpgDKsQmgnETliDt8JP1B2c8HLQcdt9eG6mgLGCh9WaAXTiS539J3wbuWpD8IWwpwrn/iJRdXlgJTAOU4owBxLEmCO4aEpAqlwq2dKHWsgD9eUwDDCRIJA6WQr1Qka9wiqEI5+58K7DM7ERqaAijHJoBynMkElpNyy/Z0xhRAOU5PgOOdW3OSKGkhTeN2egIYlccmgHKqGn8G438p7x8lnXH3CZKg2HG7sj9gCqCcRMLAKEvmdWlxpPIR93Oe21aZ007iYAqgHOcSQdLunkenf+mKP0AqRet4DpPjdWWsEqYAyrEJoBznlgAOhUXS/wqQ9CYhr4WcUxbOjQPAItgSYDiK0wpABC0K8JNJkjWWUxUKWbtrL3kWiymAcmwCKCeRvYC4tGDinN7+gZMhZ9CVlz6kt3zpvOMswj9mHYXtBRhVp6pOIFm0dLoHwU8Ep9M3yKJqWu/06qIyhpVSB+mZrZNjGsP5kLr1b38MQPzP2V+WURaHKYBybAIoJ9E8AD/dm0715nJ5JDNxfdfDm0L33rdiVajseO9+AAU2lKaA9MwLIwOhsiOZj/L24X/meIdWVRpTAOUkogCDp84AABqEs/w/3eyf+L1h51sAgLGauQCApvrmyH4Xta0s0wjjUzs5pjGhjj4LfQ7AVzr6DpLGFEA5iSgAne/Ttja6HVeDNBFn3PQdJI0pgHJsAiinqksA5fQ7Jrd172U/AEEHPvLzfYitL74/eRWuk+ChWW0Bx7FQH3Hv/3ts0Ltes3F93nb0oxcdfVmvjL6XJDAFUE6iLzHwXwmVIKt6tv1WAMDurj8i+1vc/lKojCx5KBsv097Y0gpAtvyjXR/mvY/GyMd5Q01T3vZJWj3HFEA5NgGUk+heQCEZnFs3M2eJ4DIrsVuQ6JmNE9u12WO/x5XccQA41f11qKLQ84O4IvNRmAIoJxVvBcdl9T0tAIC93X6IVYTl57Qn9aE+pyumAMqxCaAcmwDKsQmgnNQ7gQMjl7xrcv7Ojl6ecvhFfeztznqhKDmEzfWzptq9M5gCKCcVCkBWzi2Pyvqz/1RtHNKzaExcidKEKYBybAIox7lcNc//x3G6JOnlmcBSHcKoTGAhJ5DGVE6ntFKYAijHaScwTrhV6ZCslP7TFCaaAijHJoBynFkCyOkq9qULTiVicd5nsdLO3mX0HFvXHEJTAOU4owClUs0MnJSRTDumAMpJrQJEJYAqvRs4Fb/ANUwBlGMTQDlOhSRA+H8BiqHSIVapY3Mt9OOYAhiGYRiGYRiGNv4HjnFDQRWHVjAAAAAASUVORK5CYII=", "p2_equip": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAEvUlEQVR4nO2dzUtUURjGT+NHiDqGmJMkgmkiBi0sCPqkRRhtghBaBUGLcCtI0H8ggVspCNoG0zaKViZCEuUqEdGKKGTSCscv0rS2vu+9zrl37tg9d57nt3vnfpzD8PC+zzn3nHuNIYQQQgghhBBCCAoH4u7AfpFu7f0b5fr81/dl+9/sJhV3B0i8UADgUADglE2d0zW/p39EHK853C3iVLpZxGvzr0U8nR0Ucbl6AmYAcCgAcCgAcCgAcBJpbPwmebTp21hZkPHCbKg2GrsuibhcTSEzADgUADgUADiJqGO65rf3DXnO0TU+c+FOqDbyc+MF72fzBMYk0xcwA4BDAYBDAYDjZM2y1Xy/Mb2n5m9uh2u0ukKE2hNU7lSJ+FDvDc8t3g6flvdIgCdgBgCHAgCHAgCnMu4OBMEzxj9zu/SNKM+Qbjsr4tzkE3k8f770fYgBZgBwKABwKABwnBin2hZ0/pwdE3HYeX4/dlaXRZyqrit8gZonWJ994zlFzw0kYV6AGQAcCgAcCgAcJ+cB9qPma1J1DYVPsDxL+JPa8vy2k/8epUuxwAwADgUADgUATizjUj3uPzXwXBz/NvFQxPvhAaKuF/BjKzcnYr0h9d3oNRG7MC/ADAAOBQAOBQCOE/MAG4szIrbWfL/6rWr0lxfDIj5Y2yTiX58nRdx9c9TSy/KEGQAcCgAcCgAcCgAcJ0yglQCTNtr0NR2TmzmrGqQJ1Mw8HRBxMaZwa3lJxLUdzXuc6Q7MAOBQAOBQAOA44QH0C52qMp2h77GZzxU8XttxseDxlYUPlgaUDwnwcKiiJvZnPVaYAcChAMChAMBxwwOozZ96Y6aHAPU33Sk3b0aux7rNsAtKHIUZABwKABwKABwnPICVADVfU5XJiPjHxDMRr+Qs4/4i0M8btjcifbjsv8AMAA4FAA4FAI6bHsA25g7gCXTNX/o4tseZRVKEL3ERZgBwKABwKABw3PQAJZhn12NyvTHk95pcv1cK9LqG2pK3UHqYAcChAMChAMBxwgPUtHSJeGdzVcTWFzoZY6rTcu5fv2hKf/RJH19fnC/ch2rVhwA+JQkvjWIGAIcCAIcCAMcND1DfIuIgNV/TdvWeiPVewYUp+WxA1/zuW48K3j/0y6UTAjMAOBQAOBQAOBQAOE6YQCtBHg6pBRraFBazqGQ3xRjTJMAMAA4FAA4FAI4THkAvpPB8MUR/KbQUCzKjLjrx6YP+wriLbwfXMAOAQwGAQwGAE4sH0LXw08sHYhdle9+QvKAUNd92j5CeID837vmtsfOy/OFVqFvGAjMAOBQAOBQAOE7MA2j0ApHc+GMRB/qKWNi5f8txvSBE99GYZIz7NcwA4FAA4FAA4DjhAXStnM4OinmBIyev229iG8dHXA+wOJUV8dFzd0Nd7yrMAOBQAOBQAOA44QFs6I2del7AGJ81AxHRbdRnTohYj/mNSca4X8MMAA4FAA4FAE4iala6tVfMC/T0j3jO0esIw74ESr9ESvuO6eygiJNY7/1gBgCHAgCHAgAnkXVMewJjjDl+5b6IbR+LtlGuNV/DDAAOBQAOBQAOBQBO2RgbP2MYhXI1fRpmAHAoAHAoAEIIIYQQQgghhBAQ/gGZpyf1xW+AKAAAAABJRU5ErkJggg==", "p3_hero": "data:image/png;base64,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", "p3_equip": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAABv0lEQVR4nO3dIY4UQRSA4YJwhTGEK2xWYldxBzQCw3EwK9DY1ai1SAJHIEHMIdgjVIU02zP9f5+uzFQmf5546UmPAQAAAAAAAAAAHMeLvS/wP50+3f+dnTl//njo32Dm5d4XYF8CiBNAnADiBBAngDgBxAkg7tXeF/hXS0ueD+/mnzPayyITIE4AcQKIE0CcAOIEECeAOAHECSDuIjdcW235tnL68m165lq3hSZAnADiBBAngDgBxAkgTgBxAoi72kfCxvef8zNvb7b5nAMzAeIEECeAOAHECSBOAHECiBNA3PUuglZstOR5/fB1eua8yTc9PxMgTgBxAogTQJwA4gQQJ4A4AcQdexHkiaApEyBOAHECiBNAnADiBBAngDgBxB17EbTg9OvP3lfYlQkQJ4A4AcQJIE4AcQKIE0CcAOIuchG08lesMd5PT5xXngiKMwHiBBAngDgBxAkgTgBxAogTQNxFLoJ+/H6cvoHr9mFM3yy2YmXptHKfa2UCxAkgTgBxAogTQJwA4gQQJ4A4AcQddsM1xhi3b+6m28Ijb/lWmABxAogTQJwA4gQQJ4A4AcQJAAAAAAAAAAAA4DCeAPKMLb0i/sqpAAAAAElFTkSuQmCC", "p4_hero": "data:image/png;base64,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", "p4_equip": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACsElEQVR4nO3dMW4TQRQG4IFQIYGUDiHOgag4AuIWXCAFR6DgAnAKlCNQobRcAUV0kbCUDpnKq3GYkXe8613vvu+rVpYVO86f/02ebCUlAAAAAAAAAAAAAAAW7NHcT4BxXby43O6u//6+O/jzfXzap8O5E4DgjIAVyGv/2efX3e2bq5vuujYONEBwAhCcAAQnAMEJQHBP5n4CtLn88XH78LY/778c/fU0QHACEJwRcKZKVZ9SSndvPv230Nnb/3+/bXocDRCcAARnBMyspeof2lV/vv83AmgiAMEZARMZUvWnpAGCE4DgjICRzV3199e/umtvCuUgAQjOCBigVPdzn+pbaYDgNEAPcx/sDmld/+Y0QHACEJwRkDn3qk+p/CkgI4CjCUBwIUfAEqq+Rev6N6cBghOA4FY9AtZS9bXP/w85/e9ogOAEILhVjIC1VH2uVvtj0wDBCUBwixsBa3gTxhD5yX+3AGpd/uQ0QHACENzZjoA1nuwP6XPyH7L3L9EAwQlAcLOPgIhVn8trv2aMnX+NBghOAIKbrGZVfbnqa6f90sInpXFO/jkNEJwABFetk16n00Idqfq2qs9NVfs5DRCcAATXaxH09N2r7vri7cvuenN1s00ppeffPnS3Ran6lMp131r1ualqP6cBguuVsjzppTbI/z1ZbqoUT6nlvXp9ftP37j/D66UBghOA4JorpzQO8oNhbmmj4di/4ZdQ9TUaIDgBCG5QFZUqs7YzyM09GsZa1+4soeprNEBwAhDc6BVVq9cho2FsrVW/+fqze51K398Sqr5GAwQnAMFNVl19RsPe/StjYmy1JU5e+2umAYITgOAm+2RQ7aR8f53Ko+G0Tyd7/PISJwoNEJwABHe2J90+b0sfw5KXOGPQAMEJAAAAAAAAAAAAAAAAAMDi/AOneP0FdmSODQAAAABJRU5ErkJggg==", "p5_hero": "data:image/png;base64,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", "p5_equip": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACS0lEQVR4nO3dsS5DURyA8RILJilirZUFqcHWSCxi60N4CKOkr9BnEKuFNGIxGHTRSaKbGIgJMTE599wmbZq0XD3f95uOFrmRL//T3ttcpZIkSZIklqmiD+C3VOYrX6P8fPetm+zfJjZd9AGoWAYAZwBwM0UfwDjtLa6Ffb++Wh3pdzU6pdxriFRfEzgB4AwAbuLHWr+x//r+kfu+1tNdWNf2s/Xl2XpY765k64W52dzPNzpXYZ3SduAEgDMAuKTeBcRjv9m9yT1XO3gI6/vP6PFoO2j12Q5S5gSAMwC4pLaAQdovt2G9Ud4M65PH7PGlPz2i/8EJAGcAcEltAfHJm8PKdu655nU9rNs7p9n6Yiuc1IlPKlE4AeAMAM4A4Cb+NcD5cye+MDPU5wHifZ/OCQBnAHDJjsLej4X3u4Yfv/WLLwD1XkxK6TMAMScAnAHATfy7gH5SHdnj5gSAMwA4A4AzADgDgDMAOAOAMwA4A4AzADgDgDMAOAOAMwA4A4AzADgDgDMAOAOAMwA4A4AzADgDgDMAOAOAMwA4A4AzADgDgDMAOAOAMwA4A4AzADgDgDMAOAOAMwA4A4AzADgDgDMAOAOAMwC4ZG8WPaxqefk4+vLoZ0G52bQTAM4AJEmSJAkFcbJjEP9xpNAMAM4A4AwAzgDgDADOAOAMAM4A4AwAzgDgDADOAOAMAM4A4AwAzgDgDADOAOAMAM4A4AwAzgDgDADOAOAMAM4A4AwAzgDgDADOAODwN4qM9d4TgMAJAGcAcAYgSZIkSSjfTL9V83oltBkAAAAASUVORK5CYII=", "p6_hero": "data:image/png;base64,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", "p6_equip": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACa0lEQVR4nO3cMYrUUBzH8VEUdUWwWOzs13Kx3ko8gxY2XsDKE3iEvYCNjWdYrDyAlWi/7XSCKApaq+8N85IXM8nv8ynDMgnsl8c/My/ZbAAAAAAAAAAAWJUrc18Ae/lVOT76/3d17AewbAIIJ4BwAggngHDX5r4A/lCb9idjBQgngHACCCeAcAII5y5gHsVp//XjO8U/fvLgRvH40fl29IVYAcIJIJwAwgkgnADCuQuYVnHa//riuOlD3n763vL5TbuErADhBBBOAOEEEE4A4Zb+XMDoKbjTOYtq035tqn9+8aX1WjwXwDgCCCeAcAIIJ4Bwh/ZbQNO++NKUfXS+nXRvfemctal+wI6d/35XZgUIJ4BwAggngHC9hsAug9ej+9eLx0+P97/M2tbqN5+/Dbqmv5UGvh1f4R78V+1WgHACCCeAcAIIJ4BwQ6bUfyb+XtucP25/DriccT40nvPd5Y/S4YOf9musAOEEEE4A4QQQTgDhek2vTb8FvDy91em0++s07W82C574S6wA4QQQTgDhBBBOAOF67QiqTcZddgq9OrtdPF76TaF158+zk5vF4zvuAlbFChBOAOEEEE4A4QQQbpaHQ1u/l6/tIOq117+ktsup8vDpYn8fsAKEE0A4AYQTQLhZ3qk39QOcJR2/2l3swFdiBQgngHACCCeAcAIIN+krYlrfll2b1GuvjikZsMFjVVN9KytAOAGEE0A4AYQTQLhZHg7dYfT28vdP7xaPP7xXvuHZ8UbviLsDK0A4AYQTQDgBhBNAuDVOulPfkayKFSCcAMIJIJwAwgkAAAAAAAAAAAAAAACW6zcVfGpV6pvo9QAAAABJRU5ErkJggg=="};
+
+    Object.assign(LPC, {"p1_fused": "data:image/png;base64,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", "p2_fused": "data:image/png;base64,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", "p3_fused": "data:image/png;base64,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", "p4_fused": "data:image/png;base64,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", "p5_fused": "data:image/png;base64,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", "p6_fused": "data:image/png;base64,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"});
+
+    Object.assign(LPC, {"monster": "data:image/png;base64,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", "wild": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAA8CAYAAABxVAqfAAAA2klEQVR4nGNkIBE05an+xyZeN+k2IynmMJFqMbXAqMXD32IWXBK4Um+UjxQuLSSl9pEX1KMW0w0wkpF6SQLLtjzDKj7ygnrUYroBnGX1yYsfsIqb6wuQpB4XGHlBPWox3QDOVI0LkJp6tx96jVV85AX1qMV0AySn6tGyetTiQW8xyakaF7j7+BtJ6kdeUI9aTDfAgquF4GknilUcV1lNKhh5QT1qMd0Ay/ELH3CNM2MdG8EFcOUOXOaPvKAetZhugKSZEwYGBgZLAwGsqR1P7sAKRl5Qj1pMNwAAW6UvbiInPPwAAAAASUVORK5CYII="});
+
+    // 1. 遊戲資料結構 (支援自訂圖片與顏色對應)
+    let BASE_HERO_PAIRS = [
+      { pairId: 'p1', name: '赤紅奧特', type: 'hero', icon: 'shield', colorTag: '#ef4444', imgUrl: LPC['p1_hero'], lpcUrl: LPC['p1_hero'] },
+      { pairId: 'p1', name: '赤紅聖劍', type: 'equip', icon: 'sword', colorTag: '#ef4444', imgUrl: LPC['p1_equip'], lpcUrl: LPC['p1_equip'] },
+      
+      { pairId: 'p2', name: '湛藍風暴', type: 'hero', icon: 'user', colorTag: '#3b82f6', imgUrl: LPC['p2_hero'], lpcUrl: LPC['p2_hero'] },
+      { pairId: 'p2', name: '風暴護盾', type: 'equip', icon: 'shield-alert', colorTag: '#3b82f6', imgUrl: LPC['p2_equip'], lpcUrl: LPC['p2_equip'] },
+
+      { pairId: 'p3', name: '黃金光輝', type: 'hero', icon: 'sun', colorTag: '#eab308', imgUrl: LPC['p3_hero'], lpcUrl: LPC['p3_hero'] },
+      { pairId: 'p3', name: '光輝水鏡', type: 'equip', icon: 'sparkles', colorTag: '#eab308', imgUrl: LPC['p3_equip'], lpcUrl: LPC['p3_equip'] },
+
+      { pairId: 'p4', name: '翡翠戰士', type: 'hero', icon: 'crown', colorTag: '#10b981', imgUrl: LPC['p4_hero'], lpcUrl: LPC['p4_hero'] },
+      { pairId: 'p4', name: '翡翠光線', type: 'equip', icon: 'zap', colorTag: '#10b981', imgUrl: LPC['p4_equip'], lpcUrl: LPC['p4_equip'] },
+
+      { pairId: 'p5', name: '紫電英雄', type: 'hero', icon: 'award', colorTag: '#a855f7', imgUrl: LPC['p5_hero'], lpcUrl: LPC['p5_hero'] },
+      { pairId: 'p5', name: '紫電變身器', type: 'equip', icon: 'cpu', colorTag: '#a855f7', imgUrl: LPC['p5_equip'], lpcUrl: LPC['p5_equip'] },
+
+      { pairId: 'p6', name: '橙焰力士', type: 'hero', icon: 'flame', colorTag: '#f97316', imgUrl: LPC['p6_hero'], lpcUrl: LPC['p6_hero'] },
+      { pairId: 'p6', name: '橙焰能量石', type: 'equip', icon: 'gem', colorTag: '#f97316', imgUrl: LPC['p6_equip'], lpcUrl: LPC['p6_equip'] }
+    ];
+
+    const ADVANCED_SPECIAL_CARDS = [
+      { pairId: 'monster_1', name: '巴爾坦星人', type: 'monster', icon: 'ghost', imgUrl: LPC['monster'], color: 'bg-purple-900/60 text-purple-300 border-purple-500' },
+      { pairId: 'wild_1', name: '超人光線', type: 'wildcard', icon: 'wand2', imgUrl: LPC['wild'], color: 'bg-amber-400/30 text-amber-200 border-amber-300' }
+    ];
+
+    // 2. 遊戲狀態變數
+    let config = {
+      contentMode: 'basic', // 'basic' | 'advanced'
+      playMode: 'single'    // 'single' | 'timer' | 'versus'
+    };
+
+    let cards = [];
+    let matchedItems = new Set();
+    let flippedCards = [];
+    let matchedPairsCount = 0;
+    let moveCount = 0;
+    let isLocked = false;
+
+    // 雙人對戰狀態
+    let currentPlayer = 1; // 1 | 2
+    let playerScores = { 1: 0, 2: 0 };
+
+    // 限時模式狀態
+    let timerInterval = null;
+    let timeRemaining = 60;
+
+    // 3. UI 模式選擇處理
+    function selectContentMode(mode) {
+      config.contentMode = mode;
+      const bBasic = document.getElementById('btnContentBasic');
+      const bAdv = document.getElementById('btnContentAdv');
+
+      if (mode === 'basic') {
+        bBasic.className = "p-3 rounded-xl border-2 border-amber-500 bg-amber-500/10 text-amber-300 text-left transition-all flex flex-col gap-1";
+        bAdv.className = "p-3 rounded-xl border-2 border-slate-700 bg-slate-900/50 text-slate-400 text-left transition-all flex flex-col gap-1 hover:border-slate-500";
+      } else {
+        bAdv.className = "p-3 rounded-xl border-2 border-red-500 bg-red-500/10 text-red-300 text-left transition-all flex flex-col gap-1";
+        bBasic.className = "p-3 rounded-xl border-2 border-slate-700 bg-slate-900/50 text-slate-400 text-left transition-all flex flex-col gap-1 hover:border-slate-500";
+      }
+    }
+
+    function selectPlayMode(mode) {
+      config.playMode = mode;
+      ['single', 'timer', 'versus'].forEach(m => {
+        const btn = document.getElementById('btnPlay' + m.charAt(0).toUpperCase() + m.slice(1));
+        if (m === mode) {
+          btn.className = "p-3 rounded-xl border-2 border-amber-500 bg-amber-500/10 text-amber-300 text-center font-bold text-sm transition-all";
+        } else {
+          btn.className = "p-3 rounded-xl border-2 border-slate-700 bg-slate-900/50 text-slate-400 text-center font-bold text-sm transition-all hover:border-slate-500";
+        }
+      });
+    }
+
+    // 洗牌演算法
+    function shuffle(array) {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // 4. 開始遊戲初始化
+    function startGame() {
+      // 隱藏設定、顯示遊戲畫面
+      document.getElementById('setupPanel').classList.add('hidden');
+      const gamePanel = document.getElementById('gamePanel');
+      gamePanel.classList.remove('hidden');
+      gamePanel.classList.add('flex');
+
+      // 重置變數
+      flippedCards = [];
+      matchedPairsCount = 0;
+      moveCount = 0;
+      isLocked = false;
+      playerScores = { 1: 0, 2: 0 };
+      currentPlayer = 1;
+      clearInterval(timerInterval);
+
+      // 更新介面顯示狀態
+      document.getElementById('moveCount').textContent = '0';
+      document.getElementById('matchCount').textContent = '0';
+      document.getElementById('toastMessage').classList.add('hidden');
+
+      // 準備卡牌內容
+      let deck = [...BASE_HERO_PAIRS];
+      if (config.contentMode === 'advanced') {
+        deck.push(...ADVANCED_SPECIAL_CARDS);
+        document.getElementById('skillArea').classList.remove('hidden');
+      } else {
+        document.getElementById('skillArea').classList.add('hidden');
+      }
+
+      matchedItems = new Set();
+      cards = shuffle(deck);
+      document.getElementById('totalPairs').textContent = Math.floor(cards.filter(c => c.type !== 'monster' && c.type !== 'wildcard').length / 2);
+
+      // 設置遊玩模式 UI
+      const statusSingle = document.getElementById('statusSingle');
+      const statusVersus = document.getElementById('statusVersus');
+      const timerDisplay = document.getElementById('timerDisplay');
+
+      if (config.playMode === 'versus') {
+        statusSingle.classList.add('hidden');
+        statusVersus.classList.remove('hidden');
+        statusVersus.classList.add('flex');
+        updateVersusUI();
+      } else {
+        statusSingle.classList.remove('hidden');
+        statusVersus.classList.add('hidden');
+        if (config.playMode === 'timer') {
+          timerDisplay.classList.remove('hidden');
+          timeRemaining = 60;
+          document.getElementById('timeRemaining').textContent = timeRemaining;
+          startTimer();
+        } else {
+          timerDisplay.classList.add('hidden');
+        }
+      }
+
+      renderGrid();
+    }
+
+    // 渲染卡牌陣列
+    function renderGrid() {
+      const cardGrid = document.getElementById('cardGrid');
+      cardGrid.innerHTML = '';
+
+      cards.forEach((item, index) => {
+        const cardContainer = document.createElement('div');
+        cardContainer.className = 'card-container aspect-[2/3] cursor-pointer';
+        cardContainer.dataset.index = index;
+        if (matchedItems.has(item)) cardContainer.classList.add('flipped', 'matched');
+
+        let typeBadge = '超人';
+        let badgeColor = 'bg-red-500/20 text-red-300';
+        if (item.type === 'equip') { typeBadge = '裝備'; badgeColor = 'bg-blue-500/20 text-blue-300'; }
+        if (item.type === 'monster') { typeBadge = '怪獸'; badgeColor = 'bg-purple-900 text-purple-200'; }
+        if (item.type === 'wildcard') { typeBadge = '道具'; badgeColor = 'bg-amber-500/30 text-amber-200'; }
+
+        // 自訂顏色標籤或預設樣式
+        const borderStyle = item.colorTag ? `border-color: ${item.colorTag}; box-shadow: inset 0 0 8px ${item.colorTag}44;` : '';
+        const tagDot = item.colorTag ? `<span class="w-2.5 h-2.5 rounded-full inline-block border border-white/50" style="background-color: ${item.colorTag}"></span>` : '';
+
+        // 卡牌正面圖案（自訂圖片 or 圖示）
+        const mediaContent = item.imgUrl 
+          ? `<img src="${item.imgUrl}" style="image-rendering:pixelated" class="w-full h-24 md:h-32 object-contain my-auto rounded-md" alt="${item.name}">`
+          : `<i data-lucide="${item.icon}" class="w-8 h-8 md:w-10 md:h-10 my-auto"></i>`;
+
+        cardContainer.innerHTML = `
+          <div class="card-inner">
+            <div class="card-face card-back flex flex-col items-center justify-center p-2 text-center">
+              <i data-lucide="shield" class="w-8 h-8 text-amber-400 mb-1 opacity-80"></i>
+              <span class="text-[10px] md:text-xs font-bold text-amber-300/80 tracking-widest">ULTRAMAN</span>
+            </div>
+            <div class="card-face card-front bg-slate-800 p-2 flex flex-col items-center justify-between border-2" style="${borderStyle}">
+              <div class="flex items-center justify-between w-full">
+                <span class="text-[9px] md:text-xs px-2 py-0.5 rounded-full font-bold ${badgeColor}">${typeBadge}</span>
+                ${tagDot}
+              </div>
+              ${mediaContent}
+              <span class="text-xs md:text-sm font-bold text-center leading-tight">${item.name}</span>
+            </div>
+          </div>
+        `;
+
+        cardContainer.addEventListener('click', () => handleCardClick(cardContainer, item));
+        cardGrid.appendChild(cardContainer);
+      });
+
+      lucide.createIcons();
+    }
+
+    // 5. 翻牌 logic
+    function handleCardClick(container, item) {
+      if (isLocked) return;
+      if (container.classList.contains('flipped') || container.classList.contains('matched')) return;
+
+      // 翻牌
+      container.classList.add('flipped');
+      flippedCards.push({ container, item });
+
+      // 特殊卡牌：怪獸卡（巴爾坦星人）
+      if (item.type === 'monster') {
+        isLocked = true;
+        setTimeout(() => triggerMonsterEvent(container), 600);
+        return;
+      }
+
+      // 特殊卡牌：萬能光線卡（自動尋找一組配對消除）
+      if (item.type === 'wildcard') {
+        isLocked = true;
+        setTimeout(() => triggerWildcardEvent(container), 600);
+        return;
+      }
+
+      // 翻了兩張一般卡牌
+      if (flippedCards.length === 2) {
+        moveCount++;
+        document.getElementById('moveCount').textContent = moveCount;
+        checkPairMatch();
+      }
+    }
+
+
+    // 配對成功：英雄與裝備合體演出
+    let fusionTimer = null, fusionDone = null;
+    function closeFusion() {
+      const ov = document.getElementById('fusionOverlay');
+      if (!ov.classList.contains('show')) return;
+      clearTimeout(fusionTimer);
+      ov.classList.remove('show');
+      const cb = fusionDone; fusionDone = null;
+      if (cb) cb();
+    }
+    function playFusion(heroItem, equipItem, done) {
+      const ov = document.getElementById('fusionOverlay');
+      const stage = document.getElementById('fusionStage');
+      const color = heroItem.colorTag || '#fbbf24';
+      ov.style.setProperty('--fz', color);
+      const pid = heroItem.pairId;
+      const useFused = LPC[pid + '_fused'] && heroItem.imgUrl === heroItem.lpcUrl && equipItem.imgUrl === equipItem.lpcUrl;
+      const heroImg = heroItem.imgUrl ? `<img class="fz-hero" src="${heroItem.imgUrl}" alt="">` : '';
+      const equipImg = equipItem.imgUrl ? `<img class="fz-equip" src="${equipItem.imgUrl}" alt="">` : '';
+      const fusedImg = useFused ? `<img class="fz-fused" src="${LPC[pid + '_fused']}" alt="${heroItem.name}">`
+        : `<div class="fz-fused" style="font-size:5rem;text-align:center;line-height:1">✨</div>`;
+      stage.innerHTML = heroImg + equipImg + '<div class="fz-flash"></div>' + fusedImg;
+      document.getElementById('fusionText').textContent = `${heroItem.name} 裝備了 ${equipItem.name}！`;
+      ov.classList.add('show');
+      fusionDone = done;
+      if (typeof confetti === 'function') setTimeout(() => confetti({ particleCount: 60, spread: 70, origin: { y: 0.55 } }), 1000);
+      fusionTimer = setTimeout(closeFusion, 2600);
+    }
+
+    // 檢查兩張卡是否配對
+    function checkPairMatch() {
+      isLocked = true;
+      const [card1, card2] = flippedCards;
+      const isMatch = (card1.item.pairId === card2.item.pairId) && (card1.item.type !== card2.item.type);
+
+      if (isMatch) {
+        // 配對成功
+        setTimeout(() => {
+          card1.container.classList.add('matched');
+          card2.container.classList.add('matched');
+          matchedItems.add(card1.item); matchedItems.add(card2.item);
+          flippedCards = [];
+          matchedPairsCount++;
+          document.getElementById('matchCount').textContent = matchedPairsCount;
+
+          if (config.playMode === 'versus') {
+            playerScores[currentPlayer] += 10;
+            updateVersusUI();
+            // 對戰模式中配對成功可連擊（繼續回合）
+          }
+
+          const heroC = card1.item.type === 'hero' ? card1 : card2;
+          const equipC = heroC === card1 ? card2 : card1;
+          playFusion(heroC.item, equipC.item, () => {
+            isLocked = false;
+            checkVictory();
+          });
+        }, 500);
+      } else {
+        // 配對失敗
+        setTimeout(() => {
+          card1.container.classList.add('shake-anim');
+          card2.container.classList.add('shake-anim');
+        }, 400);
+
+        setTimeout(() => {
+          card1.container.classList.remove('flipped', 'shake-anim');
+          card2.container.classList.remove('flipped', 'shake-anim');
+          flippedCards = [];
+
+          if (config.playMode === 'versus') {
+            // 切換玩家
+            currentPlayer = currentPlayer === 1 ? 2 : 1;
+            updateVersusUI();
+          }
+
+          isLocked = false;
+        }, 1200);
+      }
+    }
+
+    // 6. 進階模式事件：怪獸襲擊
+    function triggerMonsterEvent(monsterContainer) {
+      showToast('巴爾坦星人襲擊！未配對的卡牌被隨機洗牌了！');
+      monsterContainer.classList.add('shake-anim');
+
+      setTimeout(() => {
+        // 標記怪獸卡為已消化/消失
+        monsterContainer.classList.add('matched');
+        matchedItems.add(cards[monsterContainer.dataset.index]);
+        flippedCards = [];
+
+        // 隨機重設所有未配對卡牌的位置
+        shuffleUnmatchedCards();
+        isLocked = false;
+
+        if (config.playMode === 'versus') {
+          playerScores[currentPlayer] = Math.max(0, playerScores[currentPlayer] - 5);
+          currentPlayer = currentPlayer === 1 ? 2 : 1;
+          updateVersusUI();
+        }
+      }, 1000);
+    }
+
+    // 進階模式事件：萬能卡觸發
+    function triggerWildcardEvent(wildContainer) {
+      showToast('觸發超人光線！自動獲得一組正確配對！');
+      wildContainer.classList.add('matched');
+      matchedItems.add(cards[wildContainer.dataset.index]);
+      flippedCards = [];
+
+      // 尋找尚未配對的一組 hero/equip
+      const unMatchedContainers = Array.from(document.querySelectorAll('.card-container:not(.matched)'));
+      let targetPairId = null;
+
+      for (let c of unMatchedContainers) {
+        let idx = c.dataset.index;
+        let item = cards[idx];
+        if (item.type === 'hero' || item.type === 'equip') {
+          targetPairId = item.pairId;
+          break;
+        }
+      }
+
+      if (targetPairId) {
+        const pairCards = unMatchedContainers.filter(c => cards[c.dataset.index].pairId === targetPairId);
+        pairCards.forEach(c => {
+          c.classList.add('flipped', 'matched');
+          matchedItems.add(cards[c.dataset.index]);
+        });
+        matchedPairsCount++;
+        document.getElementById('matchCount').textContent = matchedPairsCount;
+        if (config.playMode === 'versus') {
+          playerScores[currentPlayer] += 10;
+          updateVersusUI();
+        }
+      }
+
+      setTimeout(() => {
+        isLocked = false;
+        checkVictory();
+      }, 800);
+    }
+
+    // 主動提示技能 (奧特意念)
+    function useSkillHint() {
+      if (isLocked) return;
+      const unmatched = Array.from(document.querySelectorAll('.card-container:not(.matched):not(.flipped)'));
+      if (unmatched.length < 2) return;
+
+      // 找出一組配對
+      let pairMap = {};
+      let foundPair = [];
+
+      for (let c of unmatched) {
+        let item = cards[c.dataset.index];
+        if (item.type === 'hero' || item.type === 'equip') {
+          if (pairMap[item.pairId]) {
+            foundPair = [pairMap[item.pairId], c];
+            break;
+          } else {
+            pairMap[item.pairId] = c;
+          }
+        }
+      }
+
+      if (foundPair.length === 2) {
+        foundPair.forEach(c => c.classList.add('hint-glow'));
+        showToast('奧特意念啟動！已為你提示一組配對！');
+        setTimeout(() => {
+          foundPair.forEach(c => c.classList.remove('hint-glow'));
+        }, 1500);
+      }
+    }
+
+    // 重置未配對卡牌位置
+    function shuffleUnmatchedCards() {
+      const allContainers = Array.from(document.querySelectorAll('.card-container'));
+      const unmatchedIndices = [];
+      const unmatchedItems = [];
+
+      allContainers.forEach((container, idx) => {
+        if (!container.classList.contains('matched')) {
+          unmatchedIndices.push(idx);
+          unmatchedItems.push(cards[idx]);
+          container.classList.remove('flipped');
+        }
+      });
+
+      const shuffledItems = shuffle(unmatchedItems);
+      unmatchedIndices.forEach((gridIndex, i) => {
+        cards[gridIndex] = shuffledItems[i];
+      });
+
+      renderGrid();
+    }
+
+    // 7. 計時器與雙人對戰更新
+    function startTimer() {
+      timerInterval = setInterval(() => {
+        timeRemaining--;
+        document.getElementById('timeRemaining').textContent = timeRemaining;
+
+        if (timeRemaining <= 0) {
+          clearInterval(timerInterval);
+          showEndModal(false, '⏱️ 時間到！', '很遺憾，時間內未能完成裝備大搜索，再試一次吧！');
+        }
+      }, 1000);
+    }
+
+    function updateVersusUI() {
+      const p1Box = document.getElementById('p1Box');
+      const p2Box = document.getElementById('p2Box');
+      const turnIndicator = document.getElementById('turnIndicator');
+
+      document.getElementById('p1Score').textContent = playerScores[1];
+      document.getElementById('p2Score').textContent = playerScores[2];
+
+      if (currentPlayer === 1) {
+        p1Box.className = "px-3 py-1.5 rounded-lg border-2 border-blue-500 bg-blue-500/20 text-blue-300 font-bold flex items-center gap-2";
+        p2Box.className = "px-3 py-1.5 rounded-lg border-2 border-transparent bg-slate-700/50 text-slate-400 font-bold flex items-center gap-2";
+        turnIndicator.textContent = '玩家 1 回合';
+      } else {
+        p2Box.className = "px-3 py-1.5 rounded-lg border-2 border-red-500 bg-red-500/20 text-red-300 font-bold flex items-center gap-2";
+        p1Box.className = "px-3 py-1.5 rounded-lg border-2 border-transparent bg-slate-700/50 text-slate-400 font-bold flex items-center gap-2";
+        turnIndicator.textContent = '玩家 2 回合';
+      }
+    }
+
+    // 檢查勝利
+    function checkVictory() {
+      const totalHeroPairs = Math.floor(cards.filter(c => c.type === 'hero' || c.type === 'equip').length / 2);
+      if (matchedPairsCount >= totalHeroPairs) {
+        clearInterval(timerInterval);
+
+        if (config.playMode === 'versus') {
+          let winnerText = playerScores[1] > playerScores[2] ? '🏆 玩家 1 獲勝！' : (playerScores[2] > playerScores[1] ? '🏆 玩家 2 獲勝！' : '🤝 雙方平手！');
+          showEndModal(true, winnerText, `玩家1: ${playerScores[1]} 分 | 玩家2: ${playerScores[2]} 分`);
+        } else {
+          showEndModal(true, '🎉 任務成功！', `你成功找到了所有超人的裝備！總共使用了 ${moveCount} 步。`);
+        }
+      }
+    }
+
+    // 提示通知 Toast
+    function showToast(msg) {
+      const toast = document.getElementById('toastMessage');
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 3000);
+    }
+
+    // 結算彈窗 Modal
+    function showEndModal(isWin, title, desc) {
+      document.getElementById('winTitle').textContent = title;
+      document.getElementById('winDesc').textContent = desc;
+      const modal = document.getElementById('winModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+
+      if (isWin && typeof confetti === 'function') {
+        confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+      }
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('winModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function backToMenu() {
+      clearInterval(timerInterval);
+      document.getElementById('gamePanel').classList.add('hidden');
+      document.getElementById('gamePanel').classList.remove('flex');
+      document.getElementById('setupPanel').classList.remove('hidden');
+    }
+
+    window.addEventListener('load', () => { if (window.lucide) lucide.createIcons(); });
+
+    // 8. Canva 自訂圖片與顏色設定介面 Logic
+    function toggleCustomImageModal() {
+      const modal = document.getElementById('customImgModal');
+      modal.classList.toggle('hidden');
+      modal.classList.toggle('flex');
+      if (!modal.classList.contains('hidden')) {
+        renderCustomEditor();
+      }
+    }
+
+    function renderCustomEditor() {
+      const container = document.getElementById('customPairsContainer');
+      container.innerHTML = '';
+
+      // 依 pairId 分組
+      const pairs = {};
+      BASE_HERO_PAIRS.forEach(item => {
+        if (!pairs[item.pairId]) pairs[item.pairId] = [];
+        pairs[item.pairId].push(item);
+      });
+
+      Object.keys(pairs).forEach(pId => {
+        const pair = pairs[pId];
+        const hero = pair.find(i => i.type === 'hero');
+        const equip = pair.find(i => i.type === 'equip');
+
+        const pairBox = document.createElement('div');
+        pairBox.className = 'p-3 bg-slate-900/80 rounded-xl border border-slate-700 space-y-2';
+        pairBox.innerHTML = `
+          <div class="flex justify-between items-center text-xs font-bold text-amber-300">
+            <span>組合 ${pId.replace('p', '#')}</span>
+            <div class="flex items-center gap-1">
+              <span>標籤對應色：</span>
+              <input type="color" value="${hero.colorTag || '#ef4444'}" onchange="updatePairColor('${pId}', this.value)" class="w-6 h-6 rounded cursor-pointer bg-transparent border-0">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <!-- 超人圖片上傳 -->
+            <div class="bg-slate-800 p-2 rounded-lg text-center">
+              <span class="block font-bold text-red-400 mb-1">${hero.name}</span>
+              <input type="file" accept="image/*" id="file_${hero.name}" onchange="handleImgUpload(event, '${hero.name}')" class="hidden">
+              <label for="file_${hero.name}" class="cursor-pointer block bg-slate-700 hover:bg-slate-600 p-1.5 rounded text-[11px] text-slate-300 truncate">
+                ${hero.imgUrl ? '✅ 已上傳 (點擊更換)' : '📷 上傳 Canva 圖'}
+              </label>
+            </div>
+
+            <!-- 裝備圖片上傳 -->
+            <div class="bg-slate-800 p-2 rounded-lg text-center">
+              <span class="block font-bold text-blue-400 mb-1">${equip.name}</span>
+              <input type="file" accept="image/*" id="file_${equip.name}" onchange="handleImgUpload(event, '${equip.name}')" class="hidden">
+              <label for="file_${equip.name}" class="cursor-pointer block bg-slate-700 hover:bg-slate-600 p-1.5 rounded text-[11px] text-slate-300 truncate">
+                ${equip.imgUrl ? '✅ 已上傳 (點擊更換)' : '📷 上傳 Canva 圖'}
+              </label>
+            </div>
+          </div>
+        `;
+        container.appendChild(pairBox);
+      });
+    }
+
+    function handleImgUpload(event, itemName) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const item = BASE_HERO_PAIRS.find(i => i.name === itemName);
+        if (item) {
+          item.imgUrl = e.target.result;
+          renderCustomEditor();
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function updatePairColor(pairId, colorHex) {
+      BASE_HERO_PAIRS.forEach(item => {
+        if (item.pairId === pairId) {
+          item.colorTag = colorHex;
+        }
+      });
+    }
+
+    function saveCustomPairs() {
+      toggleCustomImageModal();
+      showToast('🎨 已更新 Canva 自訂圖卡與對應顏色！');
+    }
+
+    function resetCustomPairs() {
+      BASE_HERO_PAIRS.forEach(item => {
+        item.imgUrl = item.lpcUrl || '';
+      });
+      renderCustomEditor();
+      showToast('已恢復 LPC 預設角色圖');
+    }
+  </script>
+  <div id="fusionOverlay" onclick="closeFusion()"><div id="fusionStage"></div><div id="fusionText"></div></div>
+</body>
+</html>
